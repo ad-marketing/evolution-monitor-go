@@ -1,10 +1,12 @@
 version: "3.7"
+
 services:
+  ## ====== MONITOR (Backend Go) ======
   evolution-monitor:
     image: admarketing/evolution-monitor-go:latest
 
     networks:
-      - SuaRedeAqui ## Nome da rede interna (mesma do Traefik)
+      - SuaRedeAqui
 
     environment:
       - TZ=America/Sao_Paulo
@@ -16,14 +18,13 @@ services:
       - MAX_RESTART_ATTEMPTS=3
       - WAIT_AFTER_RESTART=10000
       # ====== NOTIFICAÇÃO VIA API EXTERNA ======
-      # A notificação será enviada pela API configurada abaixo
-      # Pode ser a mesma API monitorada ou uma API externa (recomendado)
+      # Pode ser a mesma API monitorada ou outra API externa para enviar alertas
       - NOTIFICATION_API_URL=https://SUA_URL_EVOLUTION_AQUI
       - NOTIFICATION_API_KEY=SUA_API_KEY_AQUI
-      - NOTIFICATION_SENDER_INSTANCE=INSTANCIA_NAME_AQUI
-      - NOTIFICATION_ADMIN_NUMBER=NUMERO_WHATSAPP_AQUI
+      - NOTIFICATION_SENDER_INSTANCE=INSTANCIA_QUE_ENVIA_ALERTA
+      - NOTIFICATION_ADMIN_NUMBER=5500000000000
       - NOTIFICATION_ENABLED=true
-      # ====== SERVIDOR HTTP (DASHBOARD) ======
+      # ====== SERVIDOR HTTP (DASHBOARD API) ======
       - SERVER_PORT=3500
       # ====== CONFIGURAÇÕES AVANÇADAS ======
       - IGNORE_INSTANCES=
@@ -35,15 +36,6 @@ services:
       placement:
         constraints:
           - node.role == manager
-      labels:
-        - traefik.enable=1
-        - traefik.http.routers.evolution-monitor.rule=Host(`monitor.seudominio.com.br`) ## URL do Dashboard
-        - traefik.http.routers.evolution-monitor.entrypoints=websecure
-        - traefik.http.routers.evolution-monitor.priority=1
-        - traefik.http.routers.evolution-monitor.tls.certresolver=letsencryptresolver
-        - traefik.http.routers.evolution-monitor.service=evolution-monitor
-        - traefik.http.services.evolution-monitor.loadbalancer.server.port=3500
-        - traefik.http.services.evolution-monitor.loadbalancer.passHostHeader=true
 
     logging:
       driver: "json-file"
@@ -51,7 +43,36 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  ## ====== DASHBOARD (Frontend React) ======
+  evolution-monitor-dashboard:
+    image: admarketing/evolution-monitor-dashboard:latest
+
+    networks:
+      - SuaRedeAqui
+
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.evo-monitor-dashboard.rule=Host(`monitor.seudominio.com.br`)
+        - traefik.http.routers.evo-monitor-dashboard.entrypoints=websecure
+        - traefik.http.routers.evo-monitor-dashboard.priority=1
+        - traefik.http.routers.evo-monitor-dashboard.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.evo-monitor-dashboard.service=evo-monitor-dashboard
+        - traefik.http.services.evo-monitor-dashboard.loadbalancer.server.port=80
+        - traefik.http.services.evo-monitor-dashboard.loadbalancer.passHostHeader=true
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
 networks:
-  SuaRedeAqui: ## Nome da rede interna (mesma do Traefik)
+  SuaRedeAqui:
     external: true
-    name: SuaRedeAqui ## Nome da rede interna (mesma do Traefik)
+    name: SuaRedeAqui
