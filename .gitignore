@@ -1,0 +1,30 @@
+# Binários
+monitor
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Diretórios de build
+/bin/
+/dist/
+
+# Arquivos de teste
+*.test
+*.out
+coverage.html
+
+# Ambiente
+.env
+.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
