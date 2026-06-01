@@ -99,7 +99,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"name":    "Evolution Monitor",
-		"version": "2.0.0",
+		"version": "2.1.0",
 		"status":  "running",
 		"endpoints": map[string]string{
 			"health":            "/api/health",
@@ -163,6 +163,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	telegramCfg := s.cfg.GetTelegram()
 	templateCfg := s.cfg.GetMessageTemplate()
+	evolutionCfg := s.cfg.GetEvolution()
 
 	// Mascarar o token para segurança (mostrar apenas últimos 8 chars)
 	maskedToken := telegramCfg.BotToken
@@ -170,26 +171,43 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		maskedToken = "***" + maskedToken[len(maskedToken)-8:]
 	}
 
+	// Mascarar a API Key (mostrar apenas últimos 6 chars)
+	maskedAPIKey := evolutionCfg.APIKey
+	if len(maskedAPIKey) > 6 {
+		maskedAPIKey = "***" + maskedAPIKey[len(maskedAPIKey)-6:]
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"evolution": map[string]interface{}{
+			"api_url":        evolutionCfg.APIURL,
+			"api_key":        maskedAPIKey,
+			"api_key_set":    evolutionCfg.APIKey != "",
+			"check_interval": evolutionCfg.CheckInterval,
+		},
 		"telegram": map[string]interface{}{
-			"bot_token":    maskedToken,
+			"bot_token":     maskedToken,
 			"bot_token_set": telegramCfg.BotToken != "",
-			"chat_id":      telegramCfg.ChatID,
-			"enabled":      telegramCfg.Enabled,
+			"chat_id":       telegramCfg.ChatID,
+			"enabled":       telegramCfg.Enabled,
 		},
 		"message_template": templateCfg,
 	})
 }
 
 type settingsPayload struct {
-	Telegram struct {
+	Evolution *struct {
+		APIURL        string `json:"api_url"`
+		APIKey        string `json:"api_key"`
+		CheckInterval int    `json:"check_interval"`
+	} `json:"evolution,omitempty"`
+	Telegram *struct {
 		BotToken string `json:"bot_token"`
 		ChatID   string `json:"chat_id"`
 		Enabled  bool   `json:"enabled"`
-	} `json:"telegram"`
-	MessageTemplate struct {
+	} `json:"telegram,omitempty"`
+	MessageTemplate *struct {
 		Template string `json:"template"`
-	} `json:"message_template"`
+	} `json:"message_template,omitempty"`
 }
 
 func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
@@ -206,30 +224,49 @@ func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Se o token vier mascarado (***...), manter o atual
-	telegramCfg := config.TelegramConfig{
-		BotToken: payload.Telegram.BotToken,
-		ChatID:   payload.Telegram.ChatID,
-		Enabled:  payload.Telegram.Enabled,
+	// Processar Evolution config
+	var evolutionCfg *config.EvolutionConfig
+	if payload.Evolution != nil {
+		evolutionCfg = &config.EvolutionConfig{
+			APIURL:        payload.Evolution.APIURL,
+			APIKey:        payload.Evolution.APIKey,
+			CheckInterval: payload.Evolution.CheckInterval,
+		}
+		// Se a API Key vier mascarada (***...), manter a atual
+		if len(evolutionCfg.APIKey) > 3 && evolutionCfg.APIKey[:3] == "***" {
+			evolutionCfg.APIKey = s.cfg.GetAPIKey()
+		}
 	}
 
-	if len(telegramCfg.BotToken) > 0 && telegramCfg.BotToken[:3] == "***" {
-		// Token mascarado, manter o atual
-		currentTelegram := s.cfg.GetTelegram()
-		telegramCfg.BotToken = currentTelegram.BotToken
+	// Processar Telegram config
+	var telegramCfg *config.TelegramConfig
+	if payload.Telegram != nil {
+		telegramCfg = &config.TelegramConfig{
+			BotToken: payload.Telegram.BotToken,
+			ChatID:   payload.Telegram.ChatID,
+			Enabled:  payload.Telegram.Enabled,
+		}
+		// Se o token vier mascarado (***...), manter o atual
+		if len(telegramCfg.BotToken) > 3 && telegramCfg.BotToken[:3] == "***" {
+			currentTelegram := s.cfg.GetTelegram()
+			telegramCfg.BotToken = currentTelegram.BotToken
+		}
 	}
 
-	templateCfg := config.MessageTemplateConfig{
-		Template: payload.MessageTemplate.Template,
-	}
-
-	// Se template vazio, usar padrão
-	if templateCfg.Template == "" {
-		templateCfg.Template = config.DefaultTemplate
+	// Processar Template config
+	var templateCfg *config.MessageTemplateConfig
+	if payload.MessageTemplate != nil {
+		templateCfg = &config.MessageTemplateConfig{
+			Template: payload.MessageTemplate.Template,
+		}
+		// Se template vazio, usar padrão
+		if templateCfg.Template == "" {
+			templateCfg.Template = config.DefaultTemplate
+		}
 	}
 
 	// Salvar
-	if err := s.cfg.UpdateSettings(telegramCfg, templateCfg); err != nil {
+	if err := s.cfg.UpdateSettings(evolutionCfg, telegramCfg, templateCfg); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Erro ao salvar configurações"})
 		return
 	}
@@ -258,20 +295,30 @@ func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	telegramCfg := config.TelegramConfig{
-		BotToken: payload.Telegram.BotToken,
-		ChatID:   payload.Telegram.ChatID,
-		Enabled:  payload.Telegram.Enabled,
+	var telegramCfg config.TelegramConfig
+	if payload.Telegram != nil {
+		telegramCfg = config.TelegramConfig{
+			BotToken: payload.Telegram.BotToken,
+			ChatID:   payload.Telegram.ChatID,
+			Enabled:  payload.Telegram.Enabled,
+		}
+	} else {
+		telegramCfg = s.cfg.GetTelegram()
 	}
 
 	// Se token mascarado, usar o salvo
-	if len(telegramCfg.BotToken) > 0 && telegramCfg.BotToken[:3] == "***" {
+	if len(telegramCfg.BotToken) > 3 && telegramCfg.BotToken[:3] == "***" {
 		currentTelegram := s.cfg.GetTelegram()
 		telegramCfg.BotToken = currentTelegram.BotToken
 	}
 
-	templateCfg := config.MessageTemplateConfig{
-		Template: payload.MessageTemplate.Template,
+	var templateCfg config.MessageTemplateConfig
+	if payload.MessageTemplate != nil {
+		templateCfg = config.MessageTemplateConfig{
+			Template: payload.MessageTemplate.Template,
+		}
+	} else {
+		templateCfg = s.cfg.GetMessageTemplate()
 	}
 	if templateCfg.Template == "" {
 		templateCfg.Template = config.DefaultTemplate

@@ -36,6 +36,13 @@ type Config struct {
 	mu sync.RWMutex
 }
 
+// EvolutionConfig configurações da Evolution API (para o dashboard)
+type EvolutionConfig struct {
+	APIURL        string `json:"api_url"`
+	APIKey        string `json:"api_key"`
+	CheckInterval int    `json:"check_interval"`
+}
+
 // TelegramConfig configurações do bot Telegram
 type TelegramConfig struct {
 	BotToken string `json:"bot_token"`
@@ -93,7 +100,7 @@ func Load() *Config {
 		}
 	}
 
-	// Tentar carregar configurações salvas (sobrescreve env vars para telegram/template)
+	// Tentar carregar configurações salvas (sobrescreve env vars)
 	cfg.loadFromFile()
 
 	return cfg
@@ -113,14 +120,61 @@ func (c *Config) GetMessageTemplate() MessageTemplateConfig {
 	return c.MessageTemplate
 }
 
-// UpdateSettings atualiza as configurações de Telegram e template
-func (c *Config) UpdateSettings(telegram TelegramConfig, template MessageTemplateConfig) error {
+// GetEvolution retorna as configurações da Evolution de forma thread-safe
+func (c *Config) GetEvolution() EvolutionConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return EvolutionConfig{
+		APIURL:        c.EvolutionAPIURL,
+		APIKey:        c.EvolutionAPIKey,
+		CheckInterval: c.CheckInterval,
+	}
+}
+
+// UpdateSettings atualiza todas as configurações (Evolution, Telegram, Template)
+func (c *Config) UpdateSettings(evolution *EvolutionConfig, telegram *TelegramConfig, template *MessageTemplateConfig) error {
 	c.mu.Lock()
-	c.Telegram = telegram
-	c.MessageTemplate = template
+	if evolution != nil {
+		if evolution.APIURL != "" {
+			c.EvolutionAPIURL = evolution.APIURL
+		}
+		if evolution.APIKey != "" {
+			c.EvolutionAPIKey = evolution.APIKey
+		}
+		if evolution.CheckInterval > 0 {
+			c.CheckInterval = evolution.CheckInterval
+		}
+	}
+	if telegram != nil {
+		c.Telegram = *telegram
+	}
+	if template != nil {
+		c.MessageTemplate = *template
+	}
 	c.mu.Unlock()
 
 	return c.saveToFile()
+}
+
+// GetCheckInterval retorna o intervalo de forma thread-safe
+func (c *Config) GetCheckInterval() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.CheckInterval
+}
+
+// GetAPIURL retorna a URL da API de forma thread-safe
+func (c *Config) GetAPIURL() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.EvolutionAPIURL
+}
+
+// GetAPIKey retorna a API Key de forma thread-safe
+func (c *Config) GetAPIKey() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.EvolutionAPIKey
 }
 
 // IgnoreInstancesStr retorna as instâncias ignoradas como string
@@ -143,8 +197,9 @@ func (c *Config) IsIgnored(name string) bool {
 
 // Estrutura para persistência em arquivo
 type savedSettings struct {
-	Telegram        TelegramConfig        `json:"telegram"`
-	MessageTemplate MessageTemplateConfig `json:"message_template"`
+	Evolution       *EvolutionConfig       `json:"evolution,omitempty"`
+	Telegram        TelegramConfig         `json:"telegram"`
+	MessageTemplate MessageTemplateConfig  `json:"message_template"`
 }
 
 func (c *Config) loadFromFile() {
@@ -158,7 +213,18 @@ func (c *Config) loadFromFile() {
 		return
 	}
 
-	// Sobrescreve apenas se o arquivo tiver valores
+	// Sobrescreve com valores do arquivo
+	if saved.Evolution != nil {
+		if saved.Evolution.APIURL != "" {
+			c.EvolutionAPIURL = saved.Evolution.APIURL
+		}
+		if saved.Evolution.APIKey != "" {
+			c.EvolutionAPIKey = saved.Evolution.APIKey
+		}
+		if saved.Evolution.CheckInterval > 0 {
+			c.CheckInterval = saved.Evolution.CheckInterval
+		}
+	}
 	if saved.Telegram.BotToken != "" {
 		c.Telegram = saved.Telegram
 	}
@@ -173,6 +239,11 @@ func (c *Config) saveToFile() error {
 
 	c.mu.RLock()
 	saved := savedSettings{
+		Evolution: &EvolutionConfig{
+			APIURL:        c.EvolutionAPIURL,
+			APIKey:        c.EvolutionAPIKey,
+			CheckInterval: c.CheckInterval,
+		},
 		Telegram:        c.Telegram,
 		MessageTemplate: c.MessageTemplate,
 	}

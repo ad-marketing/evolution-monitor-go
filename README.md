@@ -188,7 +188,23 @@ docker compose up -d
 
 ### Configuração via Dashboard
 
-As configurações de Telegram e template de mensagem também podem ser gerenciadas pela **tela de Configurações** do dashboard web, sem precisar reiniciar o container.
+As configurações de Evolution API, Telegram e template de mensagem podem ser gerenciadas pela **tela de Configurações** do dashboard web (3 abas: Evolution | Telegram | Template), sem precisar reiniciar o container.
+
+#### Aba Evolution
+- URL da API
+- API Key Global
+- Intervalo de verificação (em segundos)
+
+#### Aba Telegram
+- Token do Bot
+- Chat ID
+- Ativar/Desativar notificações
+- Tutorial integrado de como criar o bot
+
+#### Aba Template
+- Editor de mensagem personalizada
+- Variáveis dinâmicas disponíveis: `{{instance_name}}`, `{{status}}`, `{{attempts}}`, `{{max_attempts}}`, `{{timestamp}}`, `{{server_url}}`
+- Botão de teste para validar antes de salvar
 
 ## API HTTP (Endpoints)
 
@@ -200,8 +216,8 @@ O monitor expõe uma API REST na porta `3500` (configurável via `SERVER_PORT`):
 | `/api/status` | GET | Resumo do último ciclo de monitoramento |
 | `/api/instances` | GET | Lista detalhada de todas as instâncias e seus estados |
 | `/api/stats` | GET | Estatísticas gerais (uptime, ciclos executados, etc.) |
-| `/api/settings` | GET | Retorna configurações atuais (Telegram + template) |
-| `/api/settings` | POST | Salva novas configurações |
+| `/api/settings` | GET | Retorna configurações atuais (Evolution + Telegram + Template) |
+| `/api/settings` | POST | Salva novas configurações (aceita parcial) |
 | `/api/settings/test-notification` | POST | Envia notificação de teste |
 
 ### Exemplos de Resposta
@@ -291,6 +307,8 @@ curl http://localhost:3500/api/status
 - [x] Notificação via Telegram
 - [x] Dashboard web (frontend React)
 - [x] Configuração de Telegram via dashboard
+- [x] Configuração da Evolution API via dashboard
+- [x] Intervalo de verificação configurável via dashboard
 - [x] Template de mensagem personalizável
 - [x] Integração com Traefik + Docker Swarm
 - [x] API HTTP para integração
