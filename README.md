@@ -1,6 +1,6 @@
 # Evolution Monitor
 
-Monitor automático de instâncias da [Evolution API](https://github.com/EvolutionAPI/evolution-api) v2.x com reconexão inteligente e notificações via WhatsApp.
+Monitor automático de instâncias da [Evolution API](https://github.com/EvolutionAPI/evolution-api) v2.x com reconexão inteligente e notificações via **Telegram**.
 
 Desenvolvido em **Go** — binário único, consumo mínimo de recursos (~5MB RAM), sem dependências externas.
 
@@ -9,8 +9,8 @@ Desenvolvido em **Go** — binário único, consumo mínimo de recursos (~5MB RA
 1. A cada **1 minuto**, o monitor consulta todas as instâncias da Evolution API
 2. Se uma instância estiver com status diferente de `open`, ele tenta **reconectar automaticamente**
 3. Aguarda 10 segundos e verifica novamente. Repete até **3 tentativas**
-4. Se após 3 tentativas a instância continuar offline, envia uma **notificação no WhatsApp** informando qual instância caiu
-5. A notificação pode ser enviada por uma **API externa** (recomendado), garantindo que o alerta chegue mesmo se a API monitorada estiver completamente fora
+4. Se após 3 tentativas a instância continuar offline, envia uma **notificação via Telegram** informando qual instância caiu
+5. As configurações de Telegram e template de mensagem podem ser gerenciadas pelo **Dashboard web**
 
 ## Stack Completa
 
@@ -18,8 +18,8 @@ O projeto é composto por dois serviços:
 
 | Serviço | Descrição | Imagem Docker |
 |---------|-----------|---------------|
-| **evolution-monitor** | Backend Go — monitoramento, reconexão e API HTTP | `admarketing/evolution-monitor-go:latest` |
-| **evolution-monitor-dashboard** | Frontend React — dashboard visual em tempo real | `admarketing/evolution-monitor-dashboard:latest` |
+| **evolution-monitor** | Backend Go — monitoramento, reconexão, Telegram e API HTTP | `admarketing/evolution-monitor-go:latest` |
+| **evolution-monitor-dashboard** | Frontend React — dashboard visual com tela de configurações | `admarketing/evolution-monitor-dashboard:latest` |
 
 ## Instalação via Portainer (Docker Swarm + Traefik)
 
@@ -42,6 +42,9 @@ services:
     networks:
       - SuaRedeAqui
 
+    volumes:
+      - monitor_data:/data
+
     environment:
       - TZ=America/Sao_Paulo
       # ====== API MONITORADA ======
@@ -51,13 +54,10 @@ services:
       - CHECK_INTERVAL=60000
       - MAX_RESTART_ATTEMPTS=3
       - WAIT_AFTER_RESTART=10000
-      # ====== NOTIFICAÇÃO VIA API EXTERNA ======
-      # Pode ser a mesma API monitorada ou outra API externa para enviar alertas
-      - NOTIFICATION_API_URL=https://SUA_URL_EVOLUTION_AQUI
-      - NOTIFICATION_API_KEY=SUA_API_KEY_AQUI
-      - NOTIFICATION_SENDER_INSTANCE=INSTANCIA_QUE_ENVIA_ALERTA
-      - NOTIFICATION_ADMIN_NUMBER=5500000000000
-      - NOTIFICATION_ENABLED=true
+      # ====== TELEGRAM (pode ser configurado via dashboard) ======
+      - TELEGRAM_BOT_TOKEN=
+      - TELEGRAM_CHAT_ID=
+      - TELEGRAM_ENABLED=true
       # ====== SERVIDOR HTTP (DASHBOARD API) ======
       - SERVER_PORT=3500
       # ====== CONFIGURAÇÕES AVANÇADAS ======
@@ -106,6 +106,9 @@ services:
         max-size: "5m"
         max-file: "2"
 
+volumes:
+  monitor_data:
+
 networks:
   SuaRedeAqui:
     external: true
@@ -122,6 +125,8 @@ services:
     image: admarketing/evolution-monitor-go:latest
     container_name: evolution-monitor
     restart: unless-stopped
+    volumes:
+      - ./data:/data
     environment:
       - TZ=America/Sao_Paulo
       - EVOLUTION_API_URL=https://SUA_URL_EVOLUTION_AQUI
@@ -129,11 +134,9 @@ services:
       - CHECK_INTERVAL=60000
       - MAX_RESTART_ATTEMPTS=3
       - WAIT_AFTER_RESTART=10000
-      - NOTIFICATION_API_URL=https://SUA_URL_EVOLUTION_AQUI
-      - NOTIFICATION_API_KEY=SUA_API_KEY_AQUI
-      - NOTIFICATION_SENDER_INSTANCE=INSTANCIA_QUE_ENVIA_ALERTA
-      - NOTIFICATION_ADMIN_NUMBER=5500000000000
-      - NOTIFICATION_ENABLED=true
+      - TELEGRAM_BOT_TOKEN=SEU_TOKEN_DO_BOT
+      - TELEGRAM_CHAT_ID=SEU_CHAT_ID
+      - TELEGRAM_ENABLED=true
       - SERVER_PORT=3500
       - IGNORE_INSTANCES=
       - VERBOSE=false
@@ -158,16 +161,36 @@ docker compose up -d
 | `CHECK_INTERVAL` | Intervalo de verificação em ms | `60000` (1 min) |
 | `MAX_RESTART_ATTEMPTS` | Tentativas de restart antes de notificar | `3` |
 | `WAIT_AFTER_RESTART` | Espera após restart (ms) | `10000` (10s) |
-| `NOTIFICATION_API_URL` | URL da API que ENVIA as notificações | Mesma da monitorada |
-| `NOTIFICATION_API_KEY` | API Key da API de notificação | Mesma da monitorada |
-| `NOTIFICATION_SENDER_INSTANCE` | Instância que envia os alertas | - |
-| `NOTIFICATION_ADMIN_NUMBER` | Número WhatsApp do admin (DDI+DDD+Número) | - |
-| `NOTIFICATION_ENABLED` | Habilitar notificações | `true` |
+| `TELEGRAM_BOT_TOKEN` | Token do bot do Telegram | - |
+| `TELEGRAM_CHAT_ID` | Chat ID para receber notificações | - |
+| `TELEGRAM_ENABLED` | Habilitar notificações via Telegram | `true` |
 | `SERVER_PORT` | Porta do servidor HTTP | `3500` |
 | `IGNORE_INSTANCES` | Instâncias a ignorar (separadas por vírgula) | - |
 | `VERBOSE` | Logs detalhados para debug | `false` |
 
-## API HTTP (Endpoints do Dashboard)
+## Configuração do Telegram
+
+### Como criar um Bot no Telegram
+
+1. Abra o Telegram e busque por **@BotFather**
+2. Envie o comando `/newbot`
+3. Escolha um nome para o bot (ex: "Monitor Evolution")
+4. Escolha um username (ex: `monitor_evolution_bot`)
+5. O BotFather retornará o **Token** — copie e use em `TELEGRAM_BOT_TOKEN`
+
+### Como obter o Chat ID
+
+1. Abra o Telegram e busque por **@userinfobot**
+2. Envie `/start` — ele retornará seu **Chat ID**
+3. Ou: envie uma mensagem para seu bot, depois acesse:
+   `https://api.telegram.org/bot<SEU_TOKEN>/getUpdates`
+   O `chat.id` estará na resposta JSON
+
+### Configuração via Dashboard
+
+As configurações de Telegram e template de mensagem também podem ser gerenciadas pela **tela de Configurações** do dashboard web, sem precisar reiniciar o container.
+
+## API HTTP (Endpoints)
 
 O monitor expõe uma API REST na porta `3500` (configurável via `SERVER_PORT`):
 
@@ -177,6 +200,9 @@ O monitor expõe uma API REST na porta `3500` (configurável via `SERVER_PORT`):
 | `/api/status` | GET | Resumo do último ciclo de monitoramento |
 | `/api/instances` | GET | Lista detalhada de todas as instâncias e seus estados |
 | `/api/stats` | GET | Estatísticas gerais (uptime, ciclos executados, etc.) |
+| `/api/settings` | GET | Retorna configurações atuais (Telegram + template) |
+| `/api/settings` | POST | Salva novas configurações |
+| `/api/settings/test-notification` | POST | Envia notificação de teste |
 
 ### Exemplos de Resposta
 
@@ -205,21 +231,6 @@ O monitor expõe uma API REST na porta `3500` (configurável via `SERVER_PORT`):
 ]
 ```
 
-## Notificação via API Externa
-
-Se você monitora uma VPS que possui apenas **uma instância**, recomendamos configurar a notificação via uma **API externa** (outra VPS). Assim, mesmo que a instância monitorada caia, o alerta será enviado por outro caminho.
-
-**Exemplo:**
-- VPS A (monitorada): tem a instância `PDMReservas`
-- VPS B (notificação): tem a instância `AdMarketingAPI`
-
-Configure:
-```
-EVOLUTION_API_URL=https://evo.vps-a.com.br       # API monitorada
-NOTIFICATION_API_URL=https://evo.vps-b.com.br    # API que envia o alerta
-NOTIFICATION_SENDER_INSTANCE=AdMarketingAPI       # Instância da VPS B
-```
-
 ## Comandos Úteis
 
 ```bash
@@ -236,7 +247,7 @@ docker service update --image admarketing/evolution-monitor-go:latest evolution-
 docker compose pull && docker compose up -d
 
 # Testar API
-curl https://monitor.seudominio.com.br/api/status
+curl http://localhost:3500/api/status
 ```
 
 ## Estrutura do Projeto
@@ -251,9 +262,11 @@ curl https://monitor.seudominio.com.br/api/status
 │   │   └── config.go         # Carregamento de configurações
 │   ├── monitor/
 │   │   └── monitor.go        # Lógica de monitoramento e reconexão
-│   └── server/
-│       └── server.go         # Servidor HTTP (API para dashboard)
-├── Dockerfile                 # Build multi-stage (~10MB final)
+│   ├── server/
+│   │   └── server.go         # Servidor HTTP (API para dashboard)
+│   └── telegram/
+│       └── telegram.go       # Cliente Telegram Bot API
+├── Dockerfile                 # Build multi-stage (~25MB final)
 ├── docker-compose.yml         # Compose para deploy (Swarm + Traefik)
 ├── go.mod                     # Módulo Go
 └── README.md
@@ -266,18 +279,21 @@ curl https://monitor.seudominio.com.br/api/status
 | Imagem Docker | ~50MB | ~25MB |
 | RAM em uso | ~30-50MB | ~5MB |
 | Dependências | dotenv | Nenhuma |
-| API HTTP | Não | Sim (pronto para dashboard) |
+| API HTTP | Não | Sim |
+| Dashboard | Não | Sim (container separado) |
+| Notificação | WhatsApp (Evolution) | Telegram |
+| Configuração via UI | Não | Sim |
 | Binário único | Não | Sim |
-| Integração Traefik | Manual | Labels prontas |
 
 ## Roadmap
 
 - [x] Monitoramento e reconexão automática
-- [x] Notificação via WhatsApp
-- [x] API de notificação externa
-- [x] API HTTP para integração
-- [x] Integração com Traefik + Docker Swarm
+- [x] Notificação via Telegram
 - [x] Dashboard web (frontend React)
+- [x] Configuração de Telegram via dashboard
+- [x] Template de mensagem personalizável
+- [x] Integração com Traefik + Docker Swarm
+- [x] API HTTP para integração
 - [ ] Histórico de eventos em banco de dados
 - [ ] Webhook para integrações externas
 - [ ] Autenticação no dashboard
