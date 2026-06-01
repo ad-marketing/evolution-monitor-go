@@ -1,36 +1,64 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Config contém todas as configurações do monitor
 type Config struct {
 	// API Monitorada
-	EvolutionAPIURL string
-	EvolutionAPIKey string
+	EvolutionAPIURL string `json:"evolution_api_url"`
+	EvolutionAPIKey string `json:"evolution_api_key"`
 
 	// Intervalo e tentativas
-	CheckInterval      int // em milissegundos
-	MaxRestartAttempts int
-	WaitAfterRestart   int // em milissegundos
+	CheckInterval      int `json:"check_interval"`       // em milissegundos
+	MaxRestartAttempts int `json:"max_restart_attempts"`
+	WaitAfterRestart   int `json:"wait_after_restart"`   // em milissegundos
 
-	// Notificação
-	NotificationAPIURL          string
-	NotificationAPIKey          string
-	NotificationSenderInstance  string
-	NotificationAdminNumber     string
-	NotificationEnabled         bool
+	// Telegram
+	Telegram TelegramConfig `json:"telegram"`
+
+	// Template de mensagem
+	MessageTemplate MessageTemplateConfig `json:"message_template"`
 
 	// Avançado
-	IgnoreInstances []string
-	Verbose         bool
+	IgnoreInstances []string `json:"ignore_instances"`
+	Verbose         bool     `json:"verbose"`
 
-	// Servidor HTTP (para frontend futuro)
-	ServerPort int
+	// Servidor HTTP
+	ServerPort int `json:"server_port"`
+
+	// Mutex para acesso concorrente
+	mu sync.RWMutex
 }
+
+// TelegramConfig configurações do bot Telegram
+type TelegramConfig struct {
+	BotToken string `json:"bot_token"`
+	ChatID   string `json:"chat_id"`
+	Enabled  bool   `json:"enabled"`
+}
+
+// MessageTemplateConfig template da mensagem de notificação
+type MessageTemplateConfig struct {
+	Template string `json:"template"`
+}
+
+const DefaultTemplate = `🚨 *Instância Desconectada*
+
+📛 *Instância:* {{instance_name}}
+📊 *Status:* {{status}}
+🔄 *Tentativas:* {{attempts}}/{{max_attempts}}
+🕐 *Horário:* {{timestamp}}
+🖥️ *Servidor:* {{server_url}}
+
+⚠️ A reconexão automática falhou. Verifique manualmente.`
+
+const settingsFile = "/data/settings.json"
 
 // Load carrega as configurações a partir das variáveis de ambiente
 func Load() *Config {
@@ -42,11 +70,15 @@ func Load() *Config {
 		MaxRestartAttempts: getEnvInt("MAX_RESTART_ATTEMPTS", 3),
 		WaitAfterRestart:   getEnvInt("WAIT_AFTER_RESTART", 10000),
 
-		NotificationAPIURL:         getEnv("NOTIFICATION_API_URL", ""),
-		NotificationAPIKey:         getEnv("NOTIFICATION_API_KEY", ""),
-		NotificationSenderInstance: getEnv("NOTIFICATION_SENDER_INSTANCE", ""),
-		NotificationAdminNumber:    getEnv("NOTIFICATION_ADMIN_NUMBER", ""),
-		NotificationEnabled:        getEnvBool("NOTIFICATION_ENABLED", true),
+		Telegram: TelegramConfig{
+			BotToken: getEnv("TELEGRAM_BOT_TOKEN", ""),
+			ChatID:   getEnv("TELEGRAM_CHAT_ID", ""),
+			Enabled:  getEnvBool("TELEGRAM_ENABLED", true),
+		},
+
+		MessageTemplate: MessageTemplateConfig{
+			Template: getEnv("NOTIFICATION_TEMPLATE", DefaultTemplate),
+		},
 
 		Verbose:    getEnvBool("VERBOSE", false),
 		ServerPort: getEnvInt("SERVER_PORT", 3500),
@@ -61,15 +93,34 @@ func Load() *Config {
 		}
 	}
 
-	// Se não definiu API de notificação, usa a mesma monitorada
-	if cfg.NotificationAPIURL == "" {
-		cfg.NotificationAPIURL = cfg.EvolutionAPIURL
-	}
-	if cfg.NotificationAPIKey == "" {
-		cfg.NotificationAPIKey = cfg.EvolutionAPIKey
-	}
+	// Tentar carregar configurações salvas (sobrescreve env vars para telegram/template)
+	cfg.loadFromFile()
 
 	return cfg
+}
+
+// GetTelegram retorna a config do Telegram de forma thread-safe
+func (c *Config) GetTelegram() TelegramConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.Telegram
+}
+
+// GetMessageTemplate retorna o template de forma thread-safe
+func (c *Config) GetMessageTemplate() MessageTemplateConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.MessageTemplate
+}
+
+// UpdateSettings atualiza as configurações de Telegram e template
+func (c *Config) UpdateSettings(telegram TelegramConfig, template MessageTemplateConfig) error {
+	c.mu.Lock()
+	c.Telegram = telegram
+	c.MessageTemplate = template
+	c.mu.Unlock()
+
+	return c.saveToFile()
 }
 
 // IgnoreInstancesStr retorna as instâncias ignoradas como string
@@ -88,6 +139,51 @@ func (c *Config) IsIgnored(name string) bool {
 		}
 	}
 	return false
+}
+
+// Estrutura para persistência em arquivo
+type savedSettings struct {
+	Telegram        TelegramConfig        `json:"telegram"`
+	MessageTemplate MessageTemplateConfig `json:"message_template"`
+}
+
+func (c *Config) loadFromFile() {
+	data, err := os.ReadFile(settingsFile)
+	if err != nil {
+		return // Arquivo não existe ainda, usa env vars
+	}
+
+	var saved savedSettings
+	if err := json.Unmarshal(data, &saved); err != nil {
+		return
+	}
+
+	// Sobrescreve apenas se o arquivo tiver valores
+	if saved.Telegram.BotToken != "" {
+		c.Telegram = saved.Telegram
+	}
+	if saved.MessageTemplate.Template != "" {
+		c.MessageTemplate = saved.MessageTemplate
+	}
+}
+
+func (c *Config) saveToFile() error {
+	// Criar diretório se não existir
+	os.MkdirAll("/data", 0755)
+
+	c.mu.RLock()
+	saved := savedSettings{
+		Telegram:        c.Telegram,
+		MessageTemplate: c.MessageTemplate,
+	}
+	c.mu.RUnlock()
+
+	data, err := json.MarshalIndent(saved, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(settingsFile, data, 0644)
 }
 
 func getEnv(key, defaultValue string) string {

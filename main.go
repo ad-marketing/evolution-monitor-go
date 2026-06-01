@@ -14,7 +14,7 @@ import (
 	"github.com/ad-marketing/evolution-monitor-go/internal/server"
 )
 
-const version = "1.0.0"
+const version = "2.0.0"
 
 func main() {
 	// Carregar configurações
@@ -26,18 +26,10 @@ func main() {
 	// Criar cliente da API monitorada
 	monitoredClient := api.NewClient(cfg.EvolutionAPIURL, cfg.EvolutionAPIKey)
 
-	// Criar cliente da API de notificação (pode ser externo)
-	var notificationClient *api.Client
-	if cfg.NotificationAPIURL != "" && cfg.NotificationAPIURL != cfg.EvolutionAPIURL {
-		notificationClient = api.NewClient(cfg.NotificationAPIURL, cfg.NotificationAPIKey)
-	} else {
-		notificationClient = monitoredClient
-	}
+	// Criar o monitor (agora usa Telegram para notificações)
+	mon := monitor.New(cfg, monitoredClient)
 
-	// Criar o monitor
-	mon := monitor.New(cfg, monitoredClient, notificationClient)
-
-	// Iniciar servidor HTTP (para frontend futuro)
+	// Iniciar servidor HTTP
 	srv := server.New(cfg, mon)
 	go srv.Start()
 
@@ -67,24 +59,23 @@ func main() {
 }
 
 func printBanner(cfg *config.Config) {
-	isExternal := cfg.NotificationAPIURL != "" && cfg.NotificationAPIURL != cfg.EvolutionAPIURL
-	notifVia := "Mesma API monitorada"
-	if isExternal {
-		notifVia = cfg.NotificationAPIURL + " (EXTERNA)"
+	telegramCfg := cfg.GetTelegram()
+	telegramStatus := "Desabilitado"
+	if telegramCfg.Enabled && telegramCfg.BotToken != "" {
+		telegramStatus = "Ativo (Chat: " + telegramCfg.ChatID + ")"
+	} else if telegramCfg.Enabled {
+		telegramStatus = "Ativo (Token não configurado)"
 	}
 
 	fmt.Println()
 	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
 	fmt.Println("║   MONITOR DE INSTÂNCIAS - EVOLUTION API v2.4.x              ║")
-	fmt.Printf("║   Versão %s (Go)                                         ║\n", version)
+	fmt.Printf("║   Versão %s (Go) — Notificação via Telegram            ║\n", version)
 	fmt.Println("╠══════════════════════════════════════════════════════════════╣")
 	fmt.Printf("║ API Monitorada: %-44s║\n", cfg.EvolutionAPIURL)
 	fmt.Printf("║ Intervalo:     %-44s║\n", fmt.Sprintf("%ds", cfg.CheckInterval/1000))
 	fmt.Printf("║ Max Retry:     %-44s║\n", fmt.Sprintf("%d tentativas", cfg.MaxRestartAttempts))
-	fmt.Printf("║ Notificar:     %-44s║\n", fmt.Sprintf("%v", cfg.NotificationEnabled))
-	fmt.Printf("║ Admin:         %-44s║\n", cfg.NotificationAdminNumber)
-	fmt.Printf("║ Notif. via:    %-44s║\n", notifVia)
-	fmt.Printf("║ Instância TX:  %-44s║\n", cfg.NotificationSenderInstance)
+	fmt.Printf("║ Telegram:      %-44s║\n", telegramStatus)
 	fmt.Printf("║ API Server:    %-44s║\n", fmt.Sprintf(":%d", cfg.ServerPort))
 	fmt.Printf("║ Ignoradas:     %-44s║\n", cfg.IgnoreInstancesStr())
 	fmt.Println("╚══════════════════════════════════════════════════════════════╝")

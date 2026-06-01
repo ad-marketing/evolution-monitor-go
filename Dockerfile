@@ -27,9 +27,13 @@ WORKDIR /app
 # Copiar binário do stage de build
 COPY --from=builder /monitor .
 
-# Criar usuário não-root
-RUN addgroup -g 1001 -S monitor && \
-    adduser -S monitor -u 1001 -G monitor
+# Criar diretório de dados persistentes e usuário não-root
+RUN mkdir -p /data && \
+    addgroup -g 1001 -S monitor && \
+    adduser -S monitor -u 1001 -G monitor && \
+    chown monitor:monitor /data
+
+VOLUME /data
 
 USER monitor
 
