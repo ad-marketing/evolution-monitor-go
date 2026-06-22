@@ -259,8 +259,8 @@ func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 			ChatID:   payload.Telegram.ChatID,
 			Enabled:  payload.Telegram.Enabled,
 		}
-		// Se o token vier mascarado (***...), manter o atual
-		if len(telegramCfg.BotToken) > 3 && telegramCfg.BotToken[:3] == "***" {
+		// Se o token vier vazio ou mascarado (***...), manter o token atual salvo
+		if telegramCfg.BotToken == "" || (len(telegramCfg.BotToken) > 3 && telegramCfg.BotToken[:3] == "***") {
 			currentTelegram := s.cfg.GetTelegram()
 			telegramCfg.BotToken = currentTelegram.BotToken
 		}
@@ -318,6 +318,7 @@ func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	currentTelegram := s.cfg.GetTelegram()
 	var telegramCfg config.TelegramConfig
 	if payload.Telegram != nil {
 		telegramCfg = config.TelegramConfig{
@@ -326,13 +327,16 @@ func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) 
 			Enabled:  payload.Telegram.Enabled,
 		}
 	} else {
-		telegramCfg = s.cfg.GetTelegram()
+		telegramCfg = currentTelegram
 	}
 
-	// Se token mascarado, usar o salvo
-	if len(telegramCfg.BotToken) > 3 && telegramCfg.BotToken[:3] == "***" {
-		currentTelegram := s.cfg.GetTelegram()
+	// Se token vier vazio ou mascarado (***...), usar o token salvo
+	if telegramCfg.BotToken == "" || (len(telegramCfg.BotToken) > 3 && telegramCfg.BotToken[:3] == "***") {
 		telegramCfg.BotToken = currentTelegram.BotToken
+	}
+	// Se chat_id vier vazio, usar o salvo
+	if telegramCfg.ChatID == "" {
+		telegramCfg.ChatID = currentTelegram.ChatID
 	}
 
 	var templateCfg config.MessageTemplateConfig

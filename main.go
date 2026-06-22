@@ -14,7 +14,7 @@ import (
 	"github.com/ad-marketing/evolution-monitor-go/internal/server"
 )
 
-const version = "2.2.0"
+const version = "2.2.2"
 
 func main() {
 	// Carregar configurações
