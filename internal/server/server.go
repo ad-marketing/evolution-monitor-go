@@ -41,6 +41,7 @@ func (s *Server) Start() {
 	// Endpoints de configuração
 	mux.HandleFunc("/api/settings", s.handleSettings)
 	mux.HandleFunc("/api/settings/test-notification", s.handleTestNotification)
+	mux.HandleFunc("/api/chatwoot/resync", s.handleChatwootResync)
 
 	// Endpoint raiz
 	mux.HandleFunc("/", s.handleRoot)
@@ -108,6 +109,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 			"stats":             "/api/stats",
 			"settings":          "/api/settings",
 			"test-notification": "/api/settings/test-notification",
+			"chatwoot-resync":   "/api/chatwoot/resync",
 		},
 	})
 }
@@ -164,6 +166,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	telegramCfg := s.cfg.GetTelegram()
 	templateCfg := s.cfg.GetMessageTemplate()
 	evolutionCfg := s.cfg.GetEvolution()
+	chatwootCfg := s.cfg.GetChatwoot()
 
 	// Mascarar o token para segurança (mostrar apenas últimos 8 chars)
 	maskedToken := telegramCfg.BotToken
@@ -191,6 +194,11 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 			"enabled":       telegramCfg.Enabled,
 		},
 		"message_template": templateCfg,
+		"chatwoot": map[string]interface{}{
+			"enabled":          chatwootCfg.Enabled,
+			"interval_minutes": chatwootCfg.IntervalMinutes,
+			"on_reconnect":     chatwootCfg.OnReconnect,
+		},
 	})
 }
 
@@ -208,6 +216,11 @@ type settingsPayload struct {
 	MessageTemplate *struct {
 		Template string `json:"template"`
 	} `json:"message_template,omitempty"`
+	Chatwoot *struct {
+		Enabled         bool `json:"enabled"`
+		IntervalMinutes int  `json:"interval_minutes"`
+		OnReconnect     bool `json:"on_reconnect"`
+	} `json:"chatwoot,omitempty"`
 }
 
 func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
@@ -265,8 +278,18 @@ func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Processar Chatwoot config
+	var chatwootCfg *config.ChatwootReconnectConfig
+	if payload.Chatwoot != nil {
+		chatwootCfg = &config.ChatwootReconnectConfig{
+			Enabled:         payload.Chatwoot.Enabled,
+			IntervalMinutes: payload.Chatwoot.IntervalMinutes,
+			OnReconnect:     payload.Chatwoot.OnReconnect,
+		}
+	}
+
 	// Salvar
-	if err := s.cfg.UpdateSettings(evolutionCfg, telegramCfg, templateCfg); err != nil {
+	if err := s.cfg.UpdateSettings(evolutionCfg, telegramCfg, templateCfg, chatwootCfg); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Erro ao salvar configurações"})
 		return
 	}
@@ -334,6 +357,30 @@ func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "message": "Notificação de teste enviada!"})
+}
+
+// handleChatwootResync dispara uma re-sincronização manual da integração Chatwoot
+func (s *Server) handleChatwootResync(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	chatwootCfg := s.cfg.GetChatwoot()
+	if !chatwootCfg.Enabled {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "Chatwoot Reconnector está desabilitado. Habilite e salve antes de re-sincronizar.",
+		})
+		return
+	}
+
+	log.Println("[INFO] Re-sincronização Chatwoot disparada manualmente via API")
+	go s.monitor.RunChatwootResyncCycle()
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "ok",
+		"message": "Re-sincronização do Chatwoot iniciada para todas as instâncias conectadas.",
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {

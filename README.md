@@ -11,6 +11,7 @@ Desenvolvido em **Go** — binário único, consumo mínimo de recursos (~5MB RA
 3. Aguarda 10 segundos e verifica novamente. Repete até **3 tentativas**
 4. Se após 3 tentativas a instância continuar offline, envia uma **notificação via Telegram** informando qual instância caiu
 5. As configurações de Telegram e template de mensagem podem ser gerenciadas pelo **Dashboard web**
+6. **Chatwoot Reconnector (v2.2.0):** re-sincroniza automaticamente a integração nativa Evolution ↔ Chatwoot, evitando a perda do vínculo com a inbox quando uma instância reconecta
 
 ## Stack Completa
 
@@ -58,6 +59,10 @@ services:
       - TELEGRAM_BOT_TOKEN=
       - TELEGRAM_CHAT_ID=
       - TELEGRAM_ENABLED=true
+      # ====== CHATWOOT RECONNECTOR (pode ser configurado via dashboard) ======
+      - CHATWOOT_RECONNECT_ENABLED=false
+      - CHATWOOT_RECONNECT_INTERVAL=30
+      - CHATWOOT_RECONNECT_ON_RECONNECT=false
       # ====== SERVIDOR HTTP (DASHBOARD API) ======
       - SERVER_PORT=3500
       # ====== CONFIGURAÇÕES AVANÇADAS ======
@@ -164,6 +169,9 @@ docker compose up -d
 | `TELEGRAM_BOT_TOKEN` | Token do bot do Telegram | - |
 | `TELEGRAM_CHAT_ID` | Chat ID para receber notificações | - |
 | `TELEGRAM_ENABLED` | Habilitar notificações via Telegram | `true` |
+| `CHATWOOT_RECONNECT_ENABLED` | Habilita o Chatwoot Reconnector | `false` |
+| `CHATWOOT_RECONNECT_INTERVAL` | Intervalo da re-sincronização periódica (minutos) | `30` |
+| `CHATWOOT_RECONNECT_ON_RECONNECT` | Re-sincroniza logo após reconectar uma instância | `false` |
 | `SERVER_PORT` | Porta do servidor HTTP | `3500` |
 | `IGNORE_INSTANCES` | Instâncias a ignorar (separadas por vírgula) | - |
 | `VERBOSE` | Logs detalhados para debug | `false` |
@@ -188,7 +196,7 @@ docker compose up -d
 
 ### Configuração via Dashboard
 
-As configurações de Evolution API, Telegram e template de mensagem podem ser gerenciadas pela **tela de Configurações** do dashboard web (3 abas: Evolution | Telegram | Template), sem precisar reiniciar o container.
+As configurações de Evolution API, Telegram, template de mensagem e Chatwoot Reconnector podem ser gerenciadas pela **tela de Configurações** do dashboard web (4 abas: Evolution | Telegram | Template | Chatwoot), sem precisar reiniciar o container.
 
 #### Aba Evolution
 - URL da API
@@ -206,6 +214,35 @@ As configurações de Evolution API, Telegram e template de mensagem podem ser g
 - Variáveis dinâmicas disponíveis: `{{instance_name}}`, `{{status}}`, `{{attempts}}`, `{{max_attempts}}`, `{{timestamp}}`, `{{server_url}}`
 - Botão de teste para validar antes de salvar
 
+#### Aba Chatwoot (v2.2.0)
+- Ativar/desativar o Chatwoot Reconnector
+- Intervalo periódico de re-sincronização (Modo A)
+- Re-sincronizar ao reconectar (Modo B)
+- Botão de re-sincronização manual imediata
+
+## Chatwoot Reconnector (v2.2.0)
+
+A Evolution API possui uma integração nativa com o **Chatwoot**. Quando uma instância do WhatsApp cai e reconecta, esse vínculo pode perder a sincronização — mensagens deixam de chegar na inbox correta. O **Chatwoot Reconnector** resolve isso re-aplicando a configuração existente da integração.
+
+### Como funciona
+
+1. Lê a configuração atual da integração via `GET /chatwoot/find/{instance}` (que retorna o **token completo**, não mascarado)
+2. Re-aplica a mesma configuração via `POST /chatwoot/set/{instance}` com `autoCreate: true` — equivale a clicar em **"Save / Auto Create"** no Evolution Manager
+3. Os dados existentes (inbox, conta, token) são **preservados**
+
+### Dois modos de operação
+
+| Modo | Variável | Descrição |
+|------|----------|-----------|
+| **A — Periódico** | `CHATWOOT_RECONNECT_INTERVAL` | Re-sincroniza todas as instâncias conectadas em intervalos fixos (padrão: 30 min). Recomendado como padrão. |
+| **B — Orientado a evento** | `CHATWOOT_RECONNECT_ON_RECONNECT` | Re-sincroniza uma instância específica **imediatamente após** o monitor reconectá-la. Opcional. |
+
+Os modos podem ser usados em conjunto. Ambos respeitam a lista `IGNORE_INSTANCES` e só atuam em instâncias com status `open` e com integração Chatwoot já ativa.
+
+### Configuração via Dashboard
+
+A aba **Chatwoot** na tela de Configurações permite ativar o reconnector, definir o intervalo periódico (1–1440 min), ativar o modo on-reconnect e disparar uma **re-sincronização manual imediata** (botão "Re-sincronizar agora").
+
 ## API HTTP (Endpoints)
 
 O monitor expõe uma API REST na porta `3500` (configurável via `SERVER_PORT`):
@@ -219,6 +256,7 @@ O monitor expõe uma API REST na porta `3500` (configurável via `SERVER_PORT`):
 | `/api/settings` | GET | Retorna configurações atuais (Evolution + Telegram + Template) |
 | `/api/settings` | POST | Salva novas configurações (aceita parcial) |
 | `/api/settings/test-notification` | POST | Envia notificação de teste |
+| `/api/chatwoot/resync` | POST | Dispara re-sincronização manual da integração Chatwoot |
 
 ### Exemplos de Resposta
 
@@ -312,6 +350,7 @@ curl http://localhost:3500/api/status
 - [x] Template de mensagem personalizável
 - [x] Integração com Traefik + Docker Swarm
 - [x] API HTTP para integração
+- [x] Chatwoot Reconnector — re-sincronização da integração Chatwoot (v2.2.0)
 - [ ] Histórico de eventos em banco de dados
 - [ ] Webhook para integrações externas
 - [ ] Autenticação no dashboard
