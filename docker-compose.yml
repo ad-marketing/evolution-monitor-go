@@ -24,6 +24,10 @@ services:
       - TELEGRAM_BOT_TOKEN=
       - TELEGRAM_CHAT_ID=
       - TELEGRAM_ENABLED=true
+      # ====== CHATWOOT RECONNECTOR (pode ser configurado via dashboard) ======
+      - CHATWOOT_RECONNECT_ENABLED=false
+      - CHATWOOT_RECONNECT_INTERVAL=30
+      - CHATWOOT_RECONNECT_ON_RECONNECT=false
       # ====== SERVIDOR HTTP (DASHBOARD API) ======
       - SERVER_PORT=3500
       # ====== CONFIGURAÇÕES AVANÇADAS ======

@@ -25,6 +25,9 @@ type Config struct {
 	// Template de mensagem
 	MessageTemplate MessageTemplateConfig `json:"message_template"`
 
+	// Chatwoot Reconnector
+	Chatwoot ChatwootReconnectConfig `json:"chatwoot"`
+
 	// Avançado
 	IgnoreInstances []string `json:"ignore_instances"`
 	Verbose         bool     `json:"verbose"`
@@ -53,6 +56,17 @@ type TelegramConfig struct {
 // MessageTemplateConfig template da mensagem de notificação
 type MessageTemplateConfig struct {
 	Template string `json:"template"`
+}
+
+// ChatwootReconnectConfig configurações do reconector do Chatwoot
+type ChatwootReconnectConfig struct {
+	// Enabled habilita a re-sincronização periódica (modo A)
+	Enabled bool `json:"enabled"`
+	// IntervalMinutes intervalo da re-sincronização periódica em minutos (padrão 30)
+	IntervalMinutes int `json:"interval_minutes"`
+	// OnReconnect habilita a re-sincronização orientada a evento (modo B):
+	// re-sincroniza o Chatwoot logo após o monitor reconectar uma instância
+	OnReconnect bool `json:"on_reconnect"`
 }
 
 const DefaultTemplate = `🚨 *Instância Desconectada*
@@ -85,6 +99,12 @@ func Load() *Config {
 
 		MessageTemplate: MessageTemplateConfig{
 			Template: getEnv("NOTIFICATION_TEMPLATE", DefaultTemplate),
+		},
+
+		Chatwoot: ChatwootReconnectConfig{
+			Enabled:         getEnvBool("CHATWOOT_RECONNECT_ENABLED", false),
+			IntervalMinutes: getEnvInt("CHATWOOT_RECONNECT_INTERVAL", 30),
+			OnReconnect:     getEnvBool("CHATWOOT_RECONNECT_ON_RECONNECT", false),
 		},
 
 		Verbose:    getEnvBool("VERBOSE", false),
@@ -120,6 +140,13 @@ func (c *Config) GetMessageTemplate() MessageTemplateConfig {
 	return c.MessageTemplate
 }
 
+// GetChatwoot retorna a config do reconector Chatwoot de forma thread-safe
+func (c *Config) GetChatwoot() ChatwootReconnectConfig {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.Chatwoot
+}
+
 // GetEvolution retorna as configurações da Evolution de forma thread-safe
 func (c *Config) GetEvolution() EvolutionConfig {
 	c.mu.RLock()
@@ -132,7 +159,7 @@ func (c *Config) GetEvolution() EvolutionConfig {
 }
 
 // UpdateSettings atualiza todas as configurações (Evolution, Telegram, Template)
-func (c *Config) UpdateSettings(evolution *EvolutionConfig, telegram *TelegramConfig, template *MessageTemplateConfig) error {
+func (c *Config) UpdateSettings(evolution *EvolutionConfig, telegram *TelegramConfig, template *MessageTemplateConfig, chatwoot *ChatwootReconnectConfig) error {
 	c.mu.Lock()
 	if evolution != nil {
 		if evolution.APIURL != "" {
@@ -150,6 +177,12 @@ func (c *Config) UpdateSettings(evolution *EvolutionConfig, telegram *TelegramCo
 	}
 	if template != nil {
 		c.MessageTemplate = *template
+	}
+	if chatwoot != nil {
+		if chatwoot.IntervalMinutes <= 0 {
+			chatwoot.IntervalMinutes = 30
+		}
+		c.Chatwoot = *chatwoot
 	}
 	c.mu.Unlock()
 
@@ -197,9 +230,10 @@ func (c *Config) IsIgnored(name string) bool {
 
 // Estrutura para persistência em arquivo
 type savedSettings struct {
-	Evolution       *EvolutionConfig       `json:"evolution,omitempty"`
-	Telegram        TelegramConfig         `json:"telegram"`
-	MessageTemplate MessageTemplateConfig  `json:"message_template"`
+	Evolution       *EvolutionConfig         `json:"evolution,omitempty"`
+	Telegram        TelegramConfig           `json:"telegram"`
+	MessageTemplate MessageTemplateConfig    `json:"message_template"`
+	Chatwoot        *ChatwootReconnectConfig `json:"chatwoot,omitempty"`
 }
 
 func (c *Config) loadFromFile() {
@@ -231,6 +265,12 @@ func (c *Config) loadFromFile() {
 	if saved.MessageTemplate.Template != "" {
 		c.MessageTemplate = saved.MessageTemplate
 	}
+	if saved.Chatwoot != nil {
+		c.Chatwoot = *saved.Chatwoot
+		if c.Chatwoot.IntervalMinutes <= 0 {
+			c.Chatwoot.IntervalMinutes = 30
+		}
+	}
 }
 
 func (c *Config) saveToFile() error {
@@ -246,6 +286,7 @@ func (c *Config) saveToFile() error {
 		},
 		Telegram:        c.Telegram,
 		MessageTemplate: c.MessageTemplate,
+		Chatwoot:        &c.Chatwoot,
 	}
 	c.mu.RUnlock()
 
